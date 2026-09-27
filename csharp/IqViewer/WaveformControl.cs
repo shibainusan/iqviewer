@@ -15,10 +15,23 @@ namespace IqViewer
         bool _dragging;
         int _dragX;
         long _dragStart;
+        bool _moved;
+        long _marker;
+        int _markerLen;
 
         const int MarginL = 60, MarginR = 12, MarginT = 10, MarginB = 28;
 
         public event EventHandler ViewChanged;
+        public event EventHandler MarkerChanged;
+
+        public long MarkerSample { get { return _marker; } }
+
+        // Number of samples covered by the FFT starting at the marker (shaded in the plot).
+        public int MarkerSpan
+        {
+            get { return _markerLen; }
+            set { _markerLen = value; Invalidate(); }
+        }
 
         public WaveformControl()
         {
@@ -38,7 +51,10 @@ namespace IqViewer
             _fullScale = fullScale;
             _start = 0;
             _length = data == null ? 0 : data.Length;
+            _marker = 0;
             RaiseChanged();
+            var h = MarkerChanged;
+            if (h != null) h(this, EventArgs.Empty);
         }
 
         public void SetScale(double sampleRate, double fullScale)
@@ -94,6 +110,7 @@ namespace IqViewer
             base.OnMouseDown(e);
             Focus();
             _dragging = true;
+            _moved = false;
             _dragX = e.X;
             _dragStart = _start;
         }
@@ -102,6 +119,8 @@ namespace IqViewer
         {
             base.OnMouseMove(e);
             if (!_dragging || _data == null) return;
+            if (Math.Abs(e.X - _dragX) > 3) _moved = true;
+            if (!_moved) return;
             double perPx = _length / (double)PlotRect.Width;
             SetView(_dragStart - (long)((e.X - _dragX) * perPx), _length);
         }
@@ -109,7 +128,16 @@ namespace IqViewer
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+            bool click = _dragging && !_moved;
             _dragging = false;
+            if (!click || _data == null || _length <= 0) return;
+            var r = PlotRect;
+            if (!r.Contains(e.Location)) return;
+            double frac = (e.X - r.Left) / (double)r.Width;
+            _marker = Math.Max(0, Math.Min(_data.Length - 1, _start + (long)(frac * _length)));
+            Invalidate();
+            var h = MarkerChanged;
+            if (h != null) h(this, EventArgs.Empty);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -162,6 +190,7 @@ namespace IqViewer
                     DrawEnvelope(g, r, Color.DeepSkyBlue, yMin, yMax, 0);
                     DrawEnvelope(g, r, Color.OrangeRed, yMin, yMax, 1);
                 }
+                DrawMarker(g, r);
                 g.ResetClip();
                 g.DrawRectangle(axisPen, r);
 
@@ -173,6 +202,18 @@ namespace IqViewer
                     g.DrawString("Q", font, brush, r.Right - 20, r.Top + 1);
                 }
             }
+        }
+
+        void DrawMarker(Graphics g, Rectangle r)
+        {
+            double pxPerSample = r.Width / (double)_length;
+            float x0 = (float)(r.Left + (_marker - _start) * pxPerSample);
+            float x1 = (float)(r.Left + (_marker + _markerLen - _start) * pxPerSample);
+            if (_markerLen > 0)
+                using (var fill = new SolidBrush(Color.FromArgb(50, Color.Orange)))
+                    g.FillRectangle(fill, x0, r.Top, Math.Max(1f, x1 - x0), r.Height);
+            using (var pen = new Pen(Color.Orange, 1.5f))
+                g.DrawLine(pen, x0, r.Top, x0, r.Bottom);
         }
 
         static float YToPx(double y, double yMin, double yMax, Rectangle r)

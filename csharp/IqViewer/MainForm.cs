@@ -17,7 +17,7 @@ namespace IqViewer
         readonly TextBox _bw = new TextBox { Text = "40" };
         readonly ComboBox _gainMode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         readonly TextBox _gain = new TextBox { Text = "0" };
-        readonly TextBox _samples = new TextBox { Text = "3072000" };
+        readonly TextBox _duration = new TextBox { Text = "100" };
         readonly TextBox _buf = new TextBox { Text = "65536" };
         readonly TextBox _file = new TextBox { Text = "iqcap.raw" };
         readonly TextBox _tools = new TextBox();
@@ -28,7 +28,9 @@ namespace IqViewer
         readonly NumericUpDown _viewStart = new NumericUpDown { Maximum = int.MaxValue };
         readonly NumericUpDown _viewLen = new NumericUpDown { Maximum = int.MaxValue };
         readonly Label _stats = new Label { AutoSize = false, Height = 64, Dock = DockStyle.Top, Font = new Font("Consolas", 10f), Padding = new Padding(4) };
+        readonly ComboBox _fftSize = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         readonly WaveformControl _plot = new WaveformControl { Dock = DockStyle.Fill };
+        readonly SpectrumControl _spectrum = new SpectrumControl { Dock = DockStyle.Fill };
         readonly TextBox _log = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Bottom, Height = 110 };
 
         IqData _data;
@@ -42,10 +44,12 @@ namespace IqViewer
             ClientSize = new Size(1150, 700);
             _gainMode.Items.AddRange(new object[] { "manual", "slow_attack", "fast_attack", "hybrid" });
             _gainMode.SelectedIndex = 0;
+            foreach (int n in new[] { 32, 64, 128, 256, 512, 1024, 2048, 4096 }) _fftSize.Items.Add(n);
+            _fftSize.SelectedItem = 1024;
             _file.Text = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "iqcap.raw");
 
-            var left = new TableLayoutPanel { Dock = DockStyle.Left, Width = 270, ColumnCount = 2, Padding = new Padding(6), AutoScroll = true };
-            left.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 105));
+            var left = new TableLayoutPanel { Dock = DockStyle.Left, Width = 300, ColumnCount = 2, Padding = new Padding(6), AutoScroll = true };
+            left.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
             left.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             AddRow(left, "Address", _addr);
             AddRow(left, _setLo, _lo);
@@ -53,11 +57,12 @@ namespace IqViewer
             AddRow(left, "RF BW (MHz)", _bw);
             AddRow(left, "Gain mode", _gainMode);
             AddRow(left, "Gain (dB)", _gain);
-            AddRow(left, "Total samples", _samples);
+            AddRow(left, "Sampling duration (ms)", _duration);
             AddRow(left, "Buffer size", _buf);
             AddRow(left, "Output file", _file);
             AddRow(left, "iio tools dir", _tools);
             AddRow(left, "Full scale", _fullScale);
+            AddRow(left, "FFT size (bins)", _fftSize);
             var btns = new FlowLayoutPanel { AutoSize = true };
             btns.Controls.AddRange(new Control[] { _capture, _cancel, _load });
             left.Controls.Add(btns);
@@ -65,7 +70,10 @@ namespace IqViewer
             AddRow(left, "View start", _viewStart);
             AddRow(left, "View length", _viewLen);
 
-            Controls.Add(_plot);
+            var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal };
+            split.Panel1.Controls.Add(_plot);
+            split.Panel2.Controls.Add(_spectrum);
+            Controls.Add(split);
             Controls.Add(_stats);
             Controls.Add(_log);
             Controls.Add(left);
@@ -76,6 +84,9 @@ namespace IqViewer
             _load.Click += (s, e) => LoadDialog();
             _fullScale.Leave += (s, e) => Refresh2();
             _rate.Leave += (s, e) => Refresh2();
+            _plot.MarkerChanged += (s, e) => UpdateFft();
+            _fftSize.SelectedIndexChanged += (s, e) => UpdateFft();
+            Shown += (s, e) => split.SplitterDistance = split.Height / 2;
             _plot.ViewChanged += (s, e) => SyncViewFields();
             _viewStart.ValueChanged += (s, e) => ApplyViewFields();
             _viewLen.ValueChanged += (s, e) => ApplyViewFields();
@@ -119,7 +130,7 @@ namespace IqViewer
                     Bandwidth = Hz(_bw),
                     GainMode = (string)_gainMode.SelectedItem,
                     Gain = D(_gain),
-                    TotalSamples = L(_samples),
+                    TotalSamples = (long)Math.Round(D(_duration) * 1e-3 * Hz(_rate)),
                     BufferSize = (int)L(_buf),
                     OutputFile = _file.Text.Trim(),
                     ToolsDir = _tools.Text.Trim(),
@@ -179,12 +190,29 @@ namespace IqViewer
             if (!double.TryParse(_fullScale.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out full) || full <= 0) return;
             if (_data == null) return;
             if (reset) _plot.SetData(_data, fs, full); else _plot.SetScale(fs, full);
+            UpdateFft();
 
             var s = _data.ComputeStats(full);
             _stats.Text = string.Format(CultureInfo.InvariantCulture,
                 "Samples: {0}   Duration: {1:0.###} ms   (FS = {2})\r\n" +
                 "RMS: {3:0.000000} (linear)   Peak: {4:0.00} dBFS   Average: {5:0.00} dBFS   Min: {6:0.00} dBFS",
                 s.Count, s.Count / fs * 1e3, full, s.RmsLinear, s.PeakDbfs, s.AverageDbfs, s.MinDbfs);
+        }
+
+        // One non-averaged FFT starting at the time-domain marker.
+        void UpdateFft()
+        {
+            double fs, full;
+            if (_data == null || _data.Length == 0) return;
+            if (!double.TryParse(_rate.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out fs)) return;
+            if (!double.TryParse(_fullScale.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out full) || full <= 0) return;
+            fs *= 1e6;
+            int n = (int)_fftSize.SelectedItem;
+            long start = Math.Max(0, Math.Min(_plot.MarkerSample, _data.Length - n));
+            _plot.MarkerSpan = n;
+            var db = Fft.SpectrumDbfs(_data, start, n, full);
+            _spectrum.SetSpectrum(db, fs, string.Format(CultureInfo.InvariantCulture,
+                "FFT {0} pts, start sample {1} ({2:0.###} us), RBW {3:0.###} kHz", n, start, start / fs * 1e6, fs / n / 1e3));
         }
 
         void SyncViewFields()
