@@ -36,7 +36,8 @@ namespace IqViewer
 
         static string Tool(CaptureParams c, string name)
         {
-            return string.IsNullOrWhiteSpace(c.ToolsDir) ? name : Path.Combine(c.ToolsDir, name + ".exe");
+            if (!string.IsNullOrWhiteSpace(c.ToolsDir)) return Path.Combine(c.ToolsDir, name + ".exe");
+            return name;
         }
 
         // Runs on a worker thread. Throws on failure or cancel.
