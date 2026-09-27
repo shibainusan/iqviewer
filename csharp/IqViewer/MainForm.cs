@@ -25,7 +25,6 @@ namespace IqViewer
         readonly Button _capture = new Button { Text = "Capture", Height = 32 };
         readonly Button _cancel = new Button { Text = "Cancel", Enabled = false };
         readonly Button _load = new Button { Text = "Load file..." };
-        readonly CheckBox _dbMode = new CheckBox { Text = "Magnitude (dBFS)", AutoSize = true };
         readonly NumericUpDown _viewStart = new NumericUpDown { Maximum = int.MaxValue };
         readonly NumericUpDown _viewLen = new NumericUpDown { Maximum = int.MaxValue };
         readonly Label _stats = new Label { AutoSize = false, Height = 64, Dock = DockStyle.Top, Font = new Font("Consolas", 10f), Padding = new Padding(4) };
@@ -63,7 +62,6 @@ namespace IqViewer
             btns.Controls.AddRange(new Control[] { _capture, _cancel, _load });
             left.Controls.Add(btns);
             left.SetColumnSpan(btns, 2);
-            AddRow(left, _dbMode, null);
             AddRow(left, "View start", _viewStart);
             AddRow(left, "View length", _viewLen);
 
@@ -76,7 +74,6 @@ namespace IqViewer
             _capture.Click += (s, e) => StartCapture();
             _cancel.Click += (s, e) => { if (_cts != null) _cts.Cancel(); _sdr.Cancel(); };
             _load.Click += (s, e) => LoadDialog();
-            _dbMode.CheckedChanged += (s, e) => _plot.DbMode = _dbMode.Checked;
             _fullScale.Leave += (s, e) => Refresh2();
             _rate.Leave += (s, e) => Refresh2();
             _plot.ViewChanged += (s, e) => SyncViewFields();

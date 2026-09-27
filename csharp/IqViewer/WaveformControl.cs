@@ -9,7 +9,7 @@ namespace IqViewer
         IqData _data;
         double _fs = 30720000;
         double _fullScale = 32768;
-        bool _dbMode;
+        bool _dbMode = true;
         long _start;
         long _length;
         bool _dragging;
