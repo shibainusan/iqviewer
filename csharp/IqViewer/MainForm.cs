@@ -11,10 +11,10 @@ namespace IqViewer
     public class MainForm : Form
     {
         readonly TextBox _addr = new TextBox { Text = "192.168.2.131" };
-        readonly CheckBox _setLo = new CheckBox { Text = "Set RX LO (Hz)", AutoSize = true };
-        readonly TextBox _lo = new TextBox { Text = "351000000" };
-        readonly TextBox _rate = new TextBox { Text = "30720000" };
-        readonly TextBox _bw = new TextBox { Text = "40000000" };
+        readonly CheckBox _setLo = new CheckBox { Text = "Set RX LO (MHz)", AutoSize = true };
+        readonly TextBox _lo = new TextBox { Text = "351" };
+        readonly TextBox _rate = new TextBox { Text = "30.72" };
+        readonly TextBox _bw = new TextBox { Text = "40" };
         readonly ComboBox _gainMode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         readonly TextBox _gain = new TextBox { Text = "0" };
         readonly TextBox _samples = new TextBox { Text = "3072000" };
@@ -50,8 +50,8 @@ namespace IqViewer
             left.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             AddRow(left, "Address", _addr);
             AddRow(left, _setLo, _lo);
-            AddRow(left, "Sample rate (Hz)", _rate);
-            AddRow(left, "RF BW (Hz)", _bw);
+            AddRow(left, "Sample rate (MHz)", _rate);
+            AddRow(left, "RF BW (MHz)", _bw);
             AddRow(left, "Gain mode", _gainMode);
             AddRow(left, "Gain (dB)", _gain);
             AddRow(left, "Total samples", _samples);
@@ -105,6 +105,8 @@ namespace IqViewer
 
         static long L(TextBox t) { return long.Parse(t.Text.Trim(), CultureInfo.InvariantCulture); }
         static double D(TextBox t) { return double.Parse(t.Text.Trim(), CultureInfo.InvariantCulture); }
+        // MHz text (decimals allowed) -> Hz
+        static long Hz(TextBox t) { return (long)Math.Round(D(t) * 1e6); }
 
         async void StartCapture()
         {
@@ -115,9 +117,9 @@ namespace IqViewer
                 {
                     Address = _addr.Text.Trim(),
                     SetLo = _setLo.Checked,
-                    LoFreq = L(_lo),
-                    SampleRate = L(_rate),
-                    Bandwidth = L(_bw),
+                    LoFreq = Hz(_lo),
+                    SampleRate = Hz(_rate),
+                    Bandwidth = Hz(_bw),
                     GainMode = (string)_gainMode.SelectedItem,
                     Gain = D(_gain),
                     TotalSamples = L(_samples),
@@ -176,6 +178,7 @@ namespace IqViewer
         {
             double fs, full;
             if (!double.TryParse(_rate.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out fs)) return;
+            fs *= 1e6;
             if (!double.TryParse(_fullScale.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out full) || full <= 0) return;
             if (_data == null) return;
             if (reset) _plot.SetData(_data, fs, full); else _plot.SetScale(fs, full);
