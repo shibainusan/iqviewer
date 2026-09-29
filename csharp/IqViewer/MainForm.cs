@@ -21,7 +21,7 @@ namespace IqViewer
         readonly TextBox _buf = new TextBox { Text = "65536" };
         readonly TextBox _file = new TextBox { Text = "iqcap.raw" };
         readonly TextBox _tools = new TextBox();
-        readonly TextBox _fullScale = new TextBox { Text = "32768" };
+        readonly TextBox _fullScale = new TextBox { Text = "2048" };
         readonly Button _capture = new Button { Text = "Capture", Height = 32 };
         readonly Button _cancel = new Button { Text = "Cancel", Enabled = false };
         readonly Button _load = new Button { Text = "Load file..." };
@@ -51,7 +51,7 @@ namespace IqViewer
             var left = new TableLayoutPanel { Dock = DockStyle.Left, Width = 300, ColumnCount = 2, Padding = new Padding(6), AutoScroll = true };
             left.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
             left.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            AddRow(left, "Address", _addr);
+            AddRow(left, "IIO Address", _addr);
             AddRow(left, _setLo, _lo);
             AddRow(left, "Sample rate (MHz)", _rate);
             AddRow(left, "RF BW (MHz)", _bw);
