@@ -21,6 +21,15 @@ namespace IqViewer
         public int BufferSize = 65536;
         public string OutputFile = "iqcap.raw";
         public string ToolsDir = "";
+
+        // True if applying 'o' would not change any SDR setting (Configure can be skipped).
+        public bool SameHardwareConfig(CaptureParams o)
+        {
+            return Address == o.Address && ToolsDir == o.ToolsDir && RxChannel == o.RxChannel &&
+                   SampleRate == o.SampleRate && Bandwidth == o.Bandwidth &&
+                   SetLo == o.SetLo && (!SetLo || LoFreq == o.LoFreq) &&
+                   GainMode == o.GainMode && (GainMode != "manual" || Gain == o.Gain);
+        }
     }
 
     public class SdrCapture

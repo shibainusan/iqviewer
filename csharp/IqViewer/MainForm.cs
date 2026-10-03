@@ -122,12 +122,21 @@ namespace IqViewer
         // MHz text (decimals allowed) -> Hz
         static long Hz(TextBox t) { return (long)Math.Round(D(t) * 1e6); }
 
-        async void StartCapture()
+        const double MinLoMHz = 50, MaxLoMHz = 6000;
+        string _paramError = "Invalid numeric parameter.";
+
+        // Reads the parameter fields; null (with _paramError set) if any field is not (yet) valid.
+        CaptureParams TryBuildParams()
         {
-            CaptureParams p;
             try
             {
-                p = new CaptureParams
+                if (_setLo.Checked && (D(_lo) < MinLoMHz || D(_lo) > MaxLoMHz))
+                {
+                    _paramError = "RX LO must be between " + MinLoMHz + " and " + MaxLoMHz + " MHz.";
+                    return null;
+                }
+                _paramError = "Invalid numeric parameter.";
+                return new CaptureParams
                 {
                     Address = _addr.Text.Trim(),
                     SetLo = _setLo.Checked,
@@ -143,9 +152,16 @@ namespace IqViewer
                     ToolsDir = _tools.Text.Trim(),
                 };
             }
-            catch (FormatException)
+            catch (FormatException) { return null; }
+            catch (OverflowException) { return null; }
+        }
+
+        async void StartCapture()
+        {
+            CaptureParams p = TryBuildParams();
+            if (p == null)
             {
-                MessageBox.Show(this, "Invalid numeric parameter.", Text);
+                MessageBox.Show(this, _paramError, Text);
                 return;
             }
 
@@ -155,7 +171,6 @@ namespace IqViewer
             var ct = _cts.Token;
             bool cont = _continuous.Checked;
             _continuous.Enabled = false;
-            _rxChannel.Enabled = false;
             Log((cont ? "--- Continuous capture start (Cancel to stop)" : "--- Capture start") + ", RX" + p.RxChannel + " ---");
             try
             {
@@ -166,15 +181,31 @@ namespace IqViewer
                 }
                 else
                 {
-                    // Configure once, then read + redraw back to back until cancelled or an error occurs.
+                    // Configure, then read + redraw back to back until cancelled or an error occurs.
+                    // Parameters are re-read before every read: hardware settings are re-applied only
+                    // when they changed; duration/buffer/file take effect on the next read. Fields that
+                    // are mid-edit (invalid) are ignored and the last valid values are kept.
                     int n = 0;
-                    if (await Task.Run(() => _sdr.Configure(p, ct)))
+                    CaptureParams applied = p;
+                    bool ok = await Task.Run(() => _sdr.Configure(applied, ct));
+                    while (ok)
                     {
-                        while (await Task.Run(() => _sdr.ReadOnce(p, ct, false)))
+                        var np = TryBuildParams();
+                        if (np != null)
                         {
-                            LoadFile(p.OutputFile, true, true);
-                            _stats.Text += string.Format("   #{0}", ++n);
+                            if (!np.SameHardwareConfig(applied))
+                            {
+                                Log("Parameters changed, reconfiguring...");
+                                var cfg = np;
+                                if (!await Task.Run(() => _sdr.Configure(cfg, ct))) break;
+                                applied = np;
+                            }
+                            p = np;
                         }
+                        var cur = p;
+                        if (!await Task.Run(() => _sdr.ReadOnce(cur, ct, false))) break;
+                        LoadFile(cur.OutputFile, true, true);
+                        _stats.Text += string.Format("   #{0}", ++n);
                     }
                     Log("Stopped.");
                 }
@@ -185,7 +216,6 @@ namespace IqViewer
                 _capture.Enabled = true;
                 _cancel.Enabled = false;
                 _continuous.Enabled = true;
-                _rxChannel.Enabled = true;
             }
         }
 
