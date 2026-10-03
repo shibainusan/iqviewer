@@ -44,14 +44,19 @@ namespace IqViewer
         public long ViewStart { get { return _start; } }
         public long ViewLength { get { return _length; } }
 
-        public void SetData(IqData data, double sampleRate, double fullScale)
+        // keepView: keep zoom/pan and marker (continuous capture) when the new data has the same length.
+        public void SetData(IqData data, double sampleRate, double fullScale, bool keepView = false)
         {
+            bool keep = keepView && _data != null && data != null && data.Length == _data.Length;
             _data = data;
             _fs = sampleRate;
             _fullScale = fullScale;
-            _start = 0;
-            _length = data == null ? 0 : data.Length;
-            _marker = 0;
+            if (!keep)
+            {
+                _start = 0;
+                _length = data == null ? 0 : data.Length;
+                _marker = 0;
+            }
             RaiseChanged();
             var h = MarkerChanged;
             if (h != null) h(this, EventArgs.Empty);

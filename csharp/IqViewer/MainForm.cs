@@ -28,6 +28,7 @@ namespace IqViewer
         readonly NumericUpDown _viewStart = new NumericUpDown { Maximum = int.MaxValue };
         readonly NumericUpDown _viewLen = new NumericUpDown { Maximum = int.MaxValue };
         readonly Label _stats = new Label { AutoSize = false, Height = 64, Dock = DockStyle.Top, Font = new Font("Consolas", 10f), Padding = new Padding(4) };
+        readonly CheckBox _continuous = new CheckBox { Text = "Continuous capture", AutoSize = true };
         readonly ComboBox _fftSize = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         readonly WaveformControl _plot = new WaveformControl { Dock = DockStyle.Fill };
         readonly SpectrumControl _spectrum = new SpectrumControl { Dock = DockStyle.Fill };
@@ -67,6 +68,7 @@ namespace IqViewer
             btns.Controls.AddRange(new Control[] { _capture, _cancel, _load });
             left.Controls.Add(btns);
             left.SetColumnSpan(btns, 2);
+            AddRow(left, _continuous, null);
             AddRow(left, "View start", _viewStart);
             AddRow(left, "View length", _viewLen);
 
@@ -146,18 +148,37 @@ namespace IqViewer
             _cancel.Enabled = true;
             _cts = new CancellationTokenSource();
             var ct = _cts.Token;
-            Log("--- Capture start ---");
+            bool cont = _continuous.Checked;
+            _continuous.Enabled = false;
+            Log(cont ? "--- Continuous capture start (Cancel to stop) ---" : "--- Capture start ---");
             try
             {
-                await Task.Run(() => _sdr.Run(p, ct));
-                LoadFile(p.OutputFile);
+                if (!cont)
+                {
+                    if (await Task.Run(() => _sdr.Run(p, ct))) LoadFile(p.OutputFile);
+                    else Log("Cancelled.");
+                }
+                else
+                {
+                    // Configure once, then read + redraw back to back until cancelled or an error occurs.
+                    int n = 0;
+                    if (await Task.Run(() => _sdr.Configure(p, ct)))
+                    {
+                        while (await Task.Run(() => _sdr.ReadOnce(p, ct, false)))
+                        {
+                            LoadFile(p.OutputFile, true, true);
+                            _stats.Text += string.Format("   #{0}", ++n);
+                        }
+                    }
+                    Log("Stopped.");
+                }
             }
-            catch (OperationCanceledException) { Log("Cancelled."); }
             catch (Exception ex) { Log("ERROR: " + ex.Message); }
             finally
             {
                 _capture.Enabled = true;
                 _cancel.Enabled = false;
+                _continuous.Enabled = true;
             }
         }
 
@@ -171,25 +192,25 @@ namespace IqViewer
             }
         }
 
-        void LoadFile(string path)
+        void LoadFile(string path, bool keepView = false, bool quiet = false)
         {
             try
             {
                 _data = IqData.Load(path);
-                Log(string.Format("Loaded {0}: {1} samples", path, _data.Length));
-                Refresh2(true);
+                if (!quiet) Log(string.Format("Loaded {0}: {1} samples", path, _data.Length));
+                Refresh2(true, keepView);
             }
             catch (Exception ex) { Log("ERROR: " + ex.Message); }
         }
 
-        void Refresh2(bool reset = false)
+        void Refresh2(bool reset = false, bool keepView = false)
         {
             double fs, full;
             if (!double.TryParse(_rate.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out fs)) return;
             fs *= 1e6;
             if (!double.TryParse(_fullScale.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out full) || full <= 0) return;
             if (_data == null) return;
-            if (reset) _plot.SetData(_data, fs, full); else _plot.SetScale(fs, full);
+            if (reset) _plot.SetData(_data, fs, full, keepView); else _plot.SetScale(fs, full);
             UpdateFft();
 
             var s = _data.ComputeStats(full);
