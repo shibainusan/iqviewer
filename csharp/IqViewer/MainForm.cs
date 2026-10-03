@@ -11,18 +11,18 @@ namespace IqViewer
     public class MainForm : Form
     {
         readonly ComboBox _mode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
-        readonly TextBox _spaStart = new TextBox { Text = "90" };
-        readonly TextBox _spaStop = new TextBox { Text = "110" };
-        readonly TextBox _spaStep = new TextBox { Text = "10" };
+        readonly TextBox _spaStart = new TextBox { Text = "2400" };
+        readonly TextBox _spaStop = new TextBox { Text = "2600" };
+        readonly TextBox _spaStep = new TextBox { Text = "40" };
         readonly TextBox _addr = new TextBox { Text = "192.168.2.131" };
         readonly CheckBox _setLo = new CheckBox { Text = "Set RX LO (MHz)", AutoSize = true };
-        readonly TextBox _lo = new TextBox { Text = "351" };
-        readonly TextBox _rate = new TextBox { Text = "30.72" };
-        readonly TextBox _bw = new TextBox { Text = "40" };
+        readonly TextBox _lo = new TextBox { Text = "2450" };
+        readonly TextBox _rate = new TextBox { Text = "61.44" };
+        readonly TextBox _bw = new TextBox { Text = "56" };
         readonly ComboBox _rxChannel = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         readonly ComboBox _gainMode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
-        readonly TextBox _gain = new TextBox { Text = "0" };
-        readonly TextBox _duration = new TextBox { Text = "100" };
+        readonly TextBox _gain = new TextBox { Text = "50" };
+        readonly TextBox _duration = new TextBox { Text = "1" };
         readonly TextBox _buf = new TextBox { Text = "65536" };
         readonly TextBox _file = new TextBox { Text = "iqcap.raw" };
         readonly TextBox _tools = new TextBox();
@@ -58,7 +58,7 @@ namespace IqViewer
             _rxChannel.Items.AddRange(new object[] { "RX1", "RX2" });
             _rxChannel.SelectedIndex = 0;
             foreach (int n in new[] { 32, 64, 128, 256, 512, 1024, 2048, 4096 }) _fftSize.Items.Add(n);
-            _fftSize.SelectedItem = 1024;
+            _fftSize.SelectedItem = 4096;
             _file.Text = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "iqcap.raw");
 
             var left = new TableLayoutPanel { Dock = DockStyle.Left, Width = 300, ColumnCount = 2, Padding = new Padding(6), AutoScroll = true };
