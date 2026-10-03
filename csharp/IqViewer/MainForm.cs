@@ -14,6 +14,7 @@ namespace IqViewer
         readonly TextBox _spaStart = new TextBox { Text = "2400" };
         readonly TextBox _spaStop = new TextBox { Text = "2600" };
         readonly TextBox _spaStep = new TextBox { Text = "40" };
+        readonly CheckBox _maxHold = new CheckBox { Text = "Max hold (continuous)", AutoSize = true };
         readonly TextBox _addr = new TextBox { Text = "192.168.2.131" };
         readonly CheckBox _setLo = new CheckBox { Text = "Set RX LO (MHz)", AutoSize = true };
         readonly TextBox _lo = new TextBox { Text = "2450" };
@@ -68,6 +69,7 @@ namespace IqViewer
             AddRow(left, "IIO Address", _addr);
             AddRow(left, _setLo, _lo);
             var spaLo = new[] { AddRow(left, "Start LO (MHz)", _spaStart), AddRow(left, "Stop LO (MHz)", _spaStop), AddRow(left, "Step (MHz)", _spaStep) };
+            AddRow(left, _maxHold, null);
             AddRow(left, "Sample rate (MHz)", _rate);
             AddRow(left, "RF BW (MHz)", _bw);
             AddRow(left, "RX channel", _rxChannel);
@@ -88,7 +90,7 @@ namespace IqViewer
             AddRow(left, "View length", _viewLen);
 
             _vsaOnly = new Control[] { _setLo, _lo, durLbl, _duration };
-            _spaOnly = new Control[] { spaLo[0], _spaStart, spaLo[1], _spaStop, spaLo[2], _spaStep };
+            _spaOnly = new Control[] { spaLo[0], _spaStart, spaLo[1], _spaStop, spaLo[2], _spaStep, _maxHold };
             ApplyMode();
             _mode.SelectedIndexChanged += (s, e) => { ApplyMode(); if (!IsSpa) UpdateFft(); };
 
@@ -272,6 +274,7 @@ namespace IqViewer
             if (!await Task.Run(() => _sdr.Configure(applied, ct))) { Log("Cancelled."); return; }
             SweepLayout layout = null;
             double[] trace = null;
+            bool prevHold = false;
             for (int sweep = 1; ; sweep++)
             {
                 if (sweep > 1)
@@ -284,10 +287,14 @@ namespace IqViewer
                             Log("Parameters changed, reconfiguring...");
                             if (!await Task.Run(() => _sdr.Configure(np, ct))) { Log("Stopped."); return; }
                             applied = np;
+                            layout = null; // gain/rate/etc. changed: held peaks are no longer comparable
                         }
                         p = np;
                     }
                 }
+                bool hold = _maxHold.Checked;
+                if (hold && !prevHold) layout = null; // turning max hold on starts from an empty trace
+                prevHold = hold;
                 double full;
                 if (!double.TryParse(_fullScale.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out full) || full <= 0) full = 2048;
                 int n = (int)_fftSize.SelectedItem;
@@ -312,10 +319,11 @@ namespace IqViewer
                         return Fft.SpectrumDbfs(got, 0, n, full);
                     });
                     if (db == null) { Log(cont ? "Stopped." : "Cancelled."); return; }
-                    layout.CopySlice(i, db, trace);
+                    layout.CopySlice(i, db, trace, hold);
                     _spectrum.SetTrace(layout.FreqMHz, trace, layout.XMinMHz, layout.XMaxMHz,
-                        string.Format(CultureInfo.InvariantCulture, "SPA sweep {0}  step {1}/{2}  LO {3:0.###} MHz  RBW {4:0.###} kHz",
-                            sweep, i + 1, layout.StepCount, lo / 1e6, p.SampleRate / (double)n / 1e3));
+                        string.Format(CultureInfo.InvariantCulture, "SPA sweep {0}  step {1}/{2}  LO {3:0.###} MHz  RBW {4:0.###} kHz{5}",
+                            sweep, i + 1, layout.StepCount, lo / 1e6, p.SampleRate / (double)n / 1e3,
+                            hold ? "  MAX HOLD" : ""));
                     _data = got; // time-domain panel shows the latest step
                     Refresh2(true, true);
                 }

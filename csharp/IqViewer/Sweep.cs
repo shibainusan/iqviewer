@@ -54,9 +54,20 @@ namespace IqViewer
         }
 
         // Copies the central slice of one step's fftshifted spectrum into the trace.
-        public void CopySlice(int step, double[] spectrumDb, double[] trace)
+        // maxHold keeps the larger of the old and new value per point (NaN = nothing held yet).
+        public void CopySlice(int step, double[] spectrumDb, double[] trace, bool maxHold)
         {
-            Array.Copy(spectrumDb, N / 2 - Bins / 2, trace, step * Bins, Bins);
+            int k0 = N / 2 - Bins / 2, o = step * Bins;
+            if (!maxHold)
+            {
+                Array.Copy(spectrumDb, k0, trace, o, Bins);
+                return;
+            }
+            for (int j = 0; j < Bins; j++)
+            {
+                double v = spectrumDb[k0 + j];
+                if (double.IsNaN(trace[o + j]) || v > trace[o + j]) trace[o + j] = v;
+            }
         }
 
         public bool SameAs(SweepLayout o)
