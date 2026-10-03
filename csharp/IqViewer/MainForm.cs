@@ -14,7 +14,7 @@ namespace IqViewer
         readonly TextBox _spaStart = new TextBox { Text = "2400" };
         readonly TextBox _spaStop = new TextBox { Text = "2600" };
         readonly TextBox _spaStep = new TextBox { Text = "40" };
-        readonly CheckBox _maxHold = new CheckBox { Text = "Max hold (continuous)", AutoSize = true };
+        readonly CheckBox _maxHold = new CheckBox { Text = "Max hold", AutoSize = true };
         readonly TextBox _addr = new TextBox { Text = "192.168.2.131" };
         readonly CheckBox _setLo = new CheckBox { Text = "Set RX LO (MHz)", AutoSize = true };
         readonly TextBox _lo = new TextBox { Text = "2450" };
@@ -46,6 +46,9 @@ namespace IqViewer
         bool _updatingView;
         int _row;                      // next row of the parameter table
         Control[] _vsaOnly, _spaOnly;  // shown only in that mode
+        double[] _holdDb;                // VSA max-hold spectrum (null = nothing held)
+        long _holdStart;
+        double _holdFs, _holdFull;
         long _swStart, _swStop, _swStep; // last valid SPA sweep (Hz), set by TryBuildParams
 
         public MainForm()
@@ -69,7 +72,6 @@ namespace IqViewer
             AddRow(left, "IIO Address", _addr);
             AddRow(left, _setLo, _lo);
             var spaLo = new[] { AddRow(left, "Start LO (MHz)", _spaStart), AddRow(left, "Stop LO (MHz)", _spaStop), AddRow(left, "Step (MHz)", _spaStep) };
-            AddRow(left, _maxHold, null);
             AddRow(left, "Sample rate (MHz)", _rate);
             AddRow(left, "RF BW (MHz)", _bw);
             AddRow(left, "RX channel", _rxChannel);
@@ -86,12 +88,14 @@ namespace IqViewer
             left.Controls.Add(btns, 0, _row++);
             left.SetColumnSpan(btns, 2);
             AddRow(left, _continuous, null);
+            AddRow(left, _maxHold, null);
             AddRow(left, "View start", _viewStart);
             AddRow(left, "View length", _viewLen);
 
             _vsaOnly = new Control[] { _setLo, _lo, durLbl, _duration };
-            _spaOnly = new Control[] { spaLo[0], _spaStart, spaLo[1], _spaStop, spaLo[2], _spaStep, _maxHold };
+            _spaOnly = new Control[] { spaLo[0], _spaStart, spaLo[1], _spaStop, spaLo[2], _spaStep };
             ApplyMode();
+            _maxHold.CheckedChanged += (s, e) => { _holdDb = null; UpdateFft(); };
             _mode.SelectedIndexChanged += (s, e) => { ApplyMode(); if (!IsSpa) UpdateFft(); };
 
             var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal };
@@ -209,6 +213,7 @@ namespace IqViewer
                 return;
             }
 
+            _holdDb = null; // max hold applies within one run
             _capture.Enabled = false;
             _cancel.Enabled = true;
             _cts = new CancellationTokenSource();
@@ -245,6 +250,7 @@ namespace IqViewer
                                 var cfg = np;
                                 if (!await Task.Run(() => _sdr.Configure(cfg, ct))) break;
                                 applied = np;
+                                _holdDb = null; // held peaks are not comparable after a hardware change
                             }
                             p = np;
                         }
@@ -382,8 +388,20 @@ namespace IqViewer
             long start = Math.Max(0, Math.Min(_plot.MarkerSample, _data.Length - n));
             _plot.MarkerSpan = n;
             var db = Fft.SpectrumDbfs(_data, start, n, full);
-            _spectrum.SetSpectrum(db, fs, string.Format(CultureInfo.InvariantCulture,
-                "FFT {0} pts, start sample {1} ({2:0.###} us), RBW {3:0.###} kHz", n, start, start / fs * 1e6, fs / n / 1e3));
+            bool hold = _maxHold.Checked;
+            if (hold && _holdDb != null && _holdDb.Length == n && _holdStart == start && _holdFs == fs && _holdFull == full)
+            {
+                for (int k = 0; k < n; k++) if (db[k] > _holdDb[k]) _holdDb[k] = db[k];
+            }
+            else
+            {
+                // Marker, FFT size, rate or full scale changed (or hold is off): start over.
+                _holdDb = hold ? db : null;
+                _holdStart = start; _holdFs = fs; _holdFull = full;
+            }
+            _spectrum.SetSpectrum(hold ? _holdDb : db, fs, string.Format(CultureInfo.InvariantCulture,
+                "FFT {0} pts, start sample {1} ({2:0.###} us), RBW {3:0.###} kHz{4}",
+                n, start, start / fs * 1e6, fs / n / 1e3, hold ? "  MAX HOLD" : ""));
         }
 
         void SyncViewFields()
