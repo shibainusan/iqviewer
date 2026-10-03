@@ -10,6 +10,10 @@ namespace IqViewer
 {
     public class MainForm : Form
     {
+        readonly ComboBox _mode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
+        readonly TextBox _spaStart = new TextBox { Text = "90" };
+        readonly TextBox _spaStop = new TextBox { Text = "110" };
+        readonly TextBox _spaStep = new TextBox { Text = "10" };
         readonly TextBox _addr = new TextBox { Text = "192.168.2.131" };
         readonly CheckBox _setLo = new CheckBox { Text = "Set RX LO (MHz)", AutoSize = true };
         readonly TextBox _lo = new TextBox { Text = "351" };
@@ -39,11 +43,16 @@ namespace IqViewer
         CancellationTokenSource _cts;
         SdrCapture _sdr;
         bool _updatingView;
+        int _row;                      // next row of the parameter table
+        Control[] _vsaOnly, _spaOnly;  // shown only in that mode
+        long _swStart, _swStop, _swStep; // last valid SPA sweep (Hz), set by TryBuildParams
 
         public MainForm()
         {
             Text = "IQ Viewer";
             ClientSize = new Size(1150, 700);
+            _mode.Items.AddRange(new object[] { "VSA", "SPA" });
+            _mode.SelectedIndex = 0;
             _gainMode.Items.AddRange(new object[] { "manual", "slow_attack", "fast_attack", "hybrid" });
             _gainMode.SelectedIndex = 0;
             _rxChannel.Items.AddRange(new object[] { "RX1", "RX2" });
@@ -55,14 +64,16 @@ namespace IqViewer
             var left = new TableLayoutPanel { Dock = DockStyle.Left, Width = 300, ColumnCount = 2, Padding = new Padding(6), AutoScroll = true };
             left.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
             left.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            AddRow(left, "Mode", _mode);
             AddRow(left, "IIO Address", _addr);
             AddRow(left, _setLo, _lo);
+            var spaLo = new[] { AddRow(left, "Start LO (MHz)", _spaStart), AddRow(left, "Stop LO (MHz)", _spaStop), AddRow(left, "Step (MHz)", _spaStep) };
             AddRow(left, "Sample rate (MHz)", _rate);
             AddRow(left, "RF BW (MHz)", _bw);
             AddRow(left, "RX channel", _rxChannel);
             AddRow(left, "Gain mode", _gainMode);
             AddRow(left, "Gain (dB)", _gain);
-            AddRow(left, "Sampling duration (ms)", _duration);
+            var durLbl = AddRow(left, "Sampling duration (ms)", _duration);
             AddRow(left, "Buffer size", _buf);
             AddRow(left, "Output file", _file);
             AddRow(left, "iio tools dir", _tools);
@@ -70,11 +81,16 @@ namespace IqViewer
             AddRow(left, "FFT size (bins)", _fftSize);
             var btns = new FlowLayoutPanel { AutoSize = true };
             btns.Controls.AddRange(new Control[] { _capture, _cancel, _load });
-            left.Controls.Add(btns);
+            left.Controls.Add(btns, 0, _row++);
             left.SetColumnSpan(btns, 2);
             AddRow(left, _continuous, null);
             AddRow(left, "View start", _viewStart);
             AddRow(left, "View length", _viewLen);
+
+            _vsaOnly = new Control[] { _setLo, _lo, durLbl, _duration };
+            _spaOnly = new Control[] { spaLo[0], _spaStart, spaLo[1], _spaStop, spaLo[2], _spaStep };
+            ApplyMode();
+            _mode.SelectedIndexChanged += (s, e) => { ApplyMode(); if (!IsSpa) UpdateFft(); };
 
             var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal };
             split.Panel1.Controls.Add(_plot);
@@ -98,17 +114,32 @@ namespace IqViewer
             _viewLen.ValueChanged += (s, e) => ApplyViewFields();
         }
 
-        static void AddRow(TableLayoutPanel t, string label, Control c)
+        // Cells are placed explicitly so hiding a row's controls (mode switch) cannot shift the others.
+        Label AddRow(TableLayoutPanel t, string label, Control c)
         {
-            AddRow(t, new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 3, 3) }, c);
+            var l = new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 3, 3) };
+            AddRow(t, l, c);
+            return l;
         }
 
-        static void AddRow(TableLayoutPanel t, Control a, Control b)
+        void AddRow(TableLayoutPanel t, Control a, Control b)
         {
-            t.Controls.Add(a);
-            if (b == null) { t.SetColumnSpan(a, 2); return; }
-            b.Dock = DockStyle.Fill;
-            t.Controls.Add(b);
+            t.Controls.Add(a, 0, _row);
+            if (b == null) t.SetColumnSpan(a, 2);
+            else
+            {
+                b.Dock = DockStyle.Fill;
+                t.Controls.Add(b, 1, _row);
+            }
+            _row++;
+        }
+
+        bool IsSpa { get { return _mode.SelectedIndex == 1; } }
+
+        void ApplyMode()
+        {
+            foreach (var c in _vsaOnly) c.Visible = !IsSpa;
+            foreach (var c in _spaOnly) c.Visible = IsSpa;
         }
 
         void Log(string msg)
@@ -130,27 +161,38 @@ namespace IqViewer
         {
             try
             {
-                if (_setLo.Checked && (D(_lo) < MinLoMHz || D(_lo) > MaxLoMHz))
+                bool spa = IsSpa;
+                if (!spa && _setLo.Checked && (D(_lo) < MinLoMHz || D(_lo) > MaxLoMHz))
                 {
                     _paramError = "RX LO must be between " + MinLoMHz + " and " + MaxLoMHz + " MHz.";
                     return null;
                 }
+                long rate = Hz(_rate), swStart = 0, swStop = 0, swStep = 0;
+                if (spa)
+                {
+                    swStart = Hz(_spaStart); swStop = Hz(_spaStop); swStep = Hz(_spaStep);
+                    string err = SweepLayout.Validate(swStart, swStop, swStep, rate, MinLoMHz * 1e6, MaxLoMHz * 1e6);
+                    if (err != null) { _paramError = err; return null; }
+                }
                 _paramError = "Invalid numeric parameter.";
-                return new CaptureParams
+                var cp = new CaptureParams
                 {
                     Address = _addr.Text.Trim(),
-                    SetLo = _setLo.Checked,
-                    LoFreq = Hz(_lo),
-                    SampleRate = Hz(_rate),
+                    SetLo = !spa && _setLo.Checked,
+                    LoFreq = spa ? 0 : Hz(_lo),
+                    SampleRate = rate,
                     Bandwidth = Hz(_bw),
                     RxChannel = _rxChannel.SelectedIndex + 1,
                     GainMode = (string)_gainMode.SelectedItem,
                     Gain = D(_gain),
-                    TotalSamples = (long)Math.Round(D(_duration) * 1e-3 * Hz(_rate)),
+                    // SPA only needs one FFT's worth of samples per LO step.
+                    TotalSamples = spa ? (int)_fftSize.SelectedItem : (long)Math.Round(D(_duration) * 1e-3 * rate),
                     BufferSize = (int)L(_buf),
                     OutputFile = _file.Text.Trim(),
                     ToolsDir = _tools.Text.Trim(),
                 };
+                if (spa) { _swStart = swStart; _swStop = swStop; _swStep = swStep; }
+                return cp;
             }
             catch (FormatException) { return null; }
             catch (OverflowException) { return null; }
@@ -171,10 +213,12 @@ namespace IqViewer
             var ct = _cts.Token;
             bool cont = _continuous.Checked;
             _continuous.Enabled = false;
-            Log((cont ? "--- Continuous capture start (Cancel to stop)" : "--- Capture start") + ", RX" + p.RxChannel + " ---");
+            _mode.Enabled = false;
+            Log((IsSpa ? "SPA " : "") + (cont ? "--- Continuous capture start (Cancel to stop)" : "--- Capture start") + ", RX" + p.RxChannel + " ---");
             try
             {
-                if (!cont)
+                if (IsSpa) await RunSweeps(p, cont, ct);
+                else if (!cont)
                 {
                     if (await Task.Run(() => _sdr.Run(p, ct))) LoadFile(p.OutputFile);
                     else Log("Cancelled.");
@@ -216,6 +260,66 @@ namespace IqViewer
                 _capture.Enabled = true;
                 _cancel.Enabled = false;
                 _continuous.Enabled = true;
+                _mode.Enabled = true;
+            }
+        }
+
+        // SPA: step the RX LO from Start to Stop, one non-averaged FFT per step, stitched into one trace.
+        // Continuous repeats the sweep; parameters are re-read at the start of each sweep.
+        async Task RunSweeps(CaptureParams p, bool cont, CancellationToken ct)
+        {
+            CaptureParams applied = p;
+            if (!await Task.Run(() => _sdr.Configure(applied, ct))) { Log("Cancelled."); return; }
+            SweepLayout layout = null;
+            double[] trace = null;
+            for (int sweep = 1; ; sweep++)
+            {
+                if (sweep > 1)
+                {
+                    var np = TryBuildParams(); // invalid (mid-edit) fields keep the last valid values
+                    if (np != null)
+                    {
+                        if (!np.SameHardwareConfig(applied))
+                        {
+                            Log("Parameters changed, reconfiguring...");
+                            if (!await Task.Run(() => _sdr.Configure(np, ct))) { Log("Stopped."); return; }
+                            applied = np;
+                        }
+                        p = np;
+                    }
+                }
+                double full;
+                if (!double.TryParse(_fullScale.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out full) || full <= 0) full = 2048;
+                int n = (int)_fftSize.SelectedItem;
+                var lay = SweepLayout.Build(_swStart, _swStop, _swStep, p.SampleRate, n);
+                if (!lay.SameAs(layout))
+                {
+                    // New layout: start from an empty trace. An unchanged layout keeps the previous
+                    // sweep visible until each step overwrites its own slice.
+                    layout = lay;
+                    trace = new double[lay.Total];
+                    for (int k = 0; k < trace.Length; k++) trace[k] = double.NaN;
+                }
+                var cur = p;
+                for (int i = 0; i < layout.StepCount; i++)
+                {
+                    long lo = layout.LoHz[i];
+                    IqData got = null;
+                    double[] db = await Task.Run(() =>
+                    {
+                        if (!_sdr.SetLo(cur, lo, ct) || !_sdr.ReadOnce(cur, ct, false)) return null;
+                        got = IqData.Load(cur.OutputFile);
+                        return Fft.SpectrumDbfs(got, 0, n, full);
+                    });
+                    if (db == null) { Log(cont ? "Stopped." : "Cancelled."); return; }
+                    layout.CopySlice(i, db, trace);
+                    _spectrum.SetTrace(layout.FreqMHz, trace, layout.XMinMHz, layout.XMaxMHz,
+                        string.Format(CultureInfo.InvariantCulture, "SPA sweep {0}  step {1}/{2}  LO {3:0.###} MHz  RBW {4:0.###} kHz",
+                            sweep, i + 1, layout.StepCount, lo / 1e6, p.SampleRate / (double)n / 1e3));
+                    _data = got; // time-domain panel shows the latest step
+                    Refresh2(true, true);
+                }
+                if (!cont) { Log("Sweep done."); return; }
             }
         }
 
@@ -261,6 +365,7 @@ namespace IqViewer
         void UpdateFft()
         {
             double fs, full;
+            if (IsSpa) return; // the spectrum panel belongs to the sweep trace
             if (_data == null || _data.Length == 0) return;
             if (!double.TryParse(_rate.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out fs)) return;
             if (!double.TryParse(_fullScale.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out full) || full <= 0) return;

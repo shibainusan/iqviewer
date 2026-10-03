@@ -57,6 +57,13 @@ namespace IqViewer
             return Configure(c, ct) && ReadOnce(c, ct, true);
         }
 
+        // Sets only the RX LO (SPA sweep step). Quiet: no per-step log lines.
+        public bool SetLo(CaptureParams c, long hz, CancellationToken ct)
+        {
+            return Exec(Tool(c, "iio_attr"),
+                "-u ip:" + c.Address + " -c ad9361-phy altvoltage0 frequency " + hz, ct, null, true);
+        }
+
         // Applies the AD9361 settings (iio_attr). Needed once; repeated reads reuse them.
         public bool Configure(CaptureParams c, CancellationToken ct)
         {
@@ -126,10 +133,10 @@ namespace IqViewer
         }
 
         // Returns false if cancelled; throws if the command fails.
-        bool Exec(string exe, string args, CancellationToken ct, string failMessage = null)
+        bool Exec(string exe, string args, CancellationToken ct, string failMessage = null, bool quiet = false)
         {
             if (ct.IsCancellationRequested) return false;
-            _log(Path.GetFileName(exe) + " " + args);
+            if (!quiet) _log(Path.GetFileName(exe) + " " + args);
             using (var p = Process.Start(Base(exe, args)))
             {
                 _current = p;
@@ -138,7 +145,7 @@ namespace IqViewer
                 p.WaitForExit();
                 string err = errTask.Result;
                 _current = null;
-                if (outp.Trim().Length > 0) _log(outp.TrimEnd());
+                if (!quiet && outp.Trim().Length > 0) _log(outp.TrimEnd());
                 if (err.Trim().Length > 0) _log(err.TrimEnd());
                 if (ct.IsCancellationRequested) return false;
                 if (p.ExitCode != 0)
