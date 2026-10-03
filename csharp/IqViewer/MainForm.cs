@@ -15,6 +15,7 @@ namespace IqViewer
         readonly TextBox _lo = new TextBox { Text = "351" };
         readonly TextBox _rate = new TextBox { Text = "30.72" };
         readonly TextBox _bw = new TextBox { Text = "40" };
+        readonly ComboBox _rxChannel = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         readonly ComboBox _gainMode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         readonly TextBox _gain = new TextBox { Text = "0" };
         readonly TextBox _duration = new TextBox { Text = "100" };
@@ -45,6 +46,8 @@ namespace IqViewer
             ClientSize = new Size(1150, 700);
             _gainMode.Items.AddRange(new object[] { "manual", "slow_attack", "fast_attack", "hybrid" });
             _gainMode.SelectedIndex = 0;
+            _rxChannel.Items.AddRange(new object[] { "RX1", "RX2" });
+            _rxChannel.SelectedIndex = 0;
             foreach (int n in new[] { 32, 64, 128, 256, 512, 1024, 2048, 4096 }) _fftSize.Items.Add(n);
             _fftSize.SelectedItem = 1024;
             _file.Text = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "iqcap.raw");
@@ -56,6 +59,7 @@ namespace IqViewer
             AddRow(left, _setLo, _lo);
             AddRow(left, "Sample rate (MHz)", _rate);
             AddRow(left, "RF BW (MHz)", _bw);
+            AddRow(left, "RX channel", _rxChannel);
             AddRow(left, "Gain mode", _gainMode);
             AddRow(left, "Gain (dB)", _gain);
             AddRow(left, "Sampling duration (ms)", _duration);
@@ -130,6 +134,7 @@ namespace IqViewer
                     LoFreq = Hz(_lo),
                     SampleRate = Hz(_rate),
                     Bandwidth = Hz(_bw),
+                    RxChannel = _rxChannel.SelectedIndex + 1,
                     GainMode = (string)_gainMode.SelectedItem,
                     Gain = D(_gain),
                     TotalSamples = (long)Math.Round(D(_duration) * 1e-3 * Hz(_rate)),
@@ -150,7 +155,8 @@ namespace IqViewer
             var ct = _cts.Token;
             bool cont = _continuous.Checked;
             _continuous.Enabled = false;
-            Log(cont ? "--- Continuous capture start (Cancel to stop) ---" : "--- Capture start ---");
+            _rxChannel.Enabled = false;
+            Log((cont ? "--- Continuous capture start (Cancel to stop)" : "--- Capture start") + ", RX" + p.RxChannel + " ---");
             try
             {
                 if (!cont)
@@ -179,6 +185,7 @@ namespace IqViewer
                 _capture.Enabled = true;
                 _cancel.Enabled = false;
                 _continuous.Enabled = true;
+                _rxChannel.Enabled = true;
             }
         }
 
