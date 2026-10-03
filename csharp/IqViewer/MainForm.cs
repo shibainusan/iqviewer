@@ -34,6 +34,12 @@ namespace IqViewer
         readonly NumericUpDown _viewStart = new NumericUpDown { Maximum = int.MaxValue };
         readonly NumericUpDown _viewLen = new NumericUpDown { Maximum = int.MaxValue };
         readonly Label _stats = new Label { AutoSize = false, Height = 64, Dock = DockStyle.Top, Font = new Font("Consolas", 10f), Padding = new Padding(4) };
+        // Lamp that flashes red when a capture reaches 0 dBFS (ADC full scale).
+        readonly Label _clip = new Label { Text = "0 dBFS", Dock = DockStyle.Right, Width = 90, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 11f, FontStyle.Bold) };
+        readonly System.Windows.Forms.Timer _clipTimer = new System.Windows.Forms.Timer { Interval = 250 };
+        DateTime _clipUntil;
+        bool _clipBlink;
+        const double ClipDbfs = -0.1; // peak magnitude at/above this counts as 0 dBFS (a full-scale I or Q sample reads about -0.004)
         readonly CheckBox _continuous = new CheckBox { Text = "Continuous capture", AutoSize = true };
         readonly ComboBox _fftSize = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         readonly WaveformControl _plot = new WaveformControl { Dock = DockStyle.Fill };
@@ -102,7 +108,17 @@ namespace IqViewer
             split.Panel1.Controls.Add(_plot);
             split.Panel2.Controls.Add(_spectrum);
             Controls.Add(split);
-            Controls.Add(_stats);
+            var statsPanel = new Panel { Dock = DockStyle.Top, Height = 64 };
+            _stats.Dock = DockStyle.Fill;
+            statsPanel.Controls.Add(_stats);
+            statsPanel.Controls.Add(_clip);
+            PaintClip(false);
+            _clipTimer.Tick += (s, e) =>
+            {
+                if (DateTime.UtcNow >= _clipUntil) { _clipTimer.Stop(); PaintClip(false); }
+                else { _clipBlink = !_clipBlink; PaintClip(_clipBlink); }
+            };
+            Controls.Add(statsPanel);
             Controls.Add(_log);
             Controls.Add(left);
 
@@ -337,6 +353,22 @@ namespace IqViewer
             }
         }
 
+        void PaintClip(bool on)
+        {
+            _clip.BackColor = on ? Color.Red : _clipTimer.Enabled ? Color.DarkRed : Color.Gainsboro;
+            _clip.ForeColor = on || _clipTimer.Enabled ? Color.White : Color.Gray;
+        }
+
+        // Keeps flashing for 1.5 s after the last 0 dBFS capture, so a single clipped capture is noticeable.
+        void TriggerClip()
+        {
+            _clipUntil = DateTime.UtcNow.AddSeconds(1.5);
+            if (_clipTimer.Enabled) return;
+            _clipBlink = true;
+            _clipTimer.Start();
+            PaintClip(true);
+        }
+
         void LoadDialog()
         {
             using (var dlg = new OpenFileDialog { Filter = "IQ files (*.raw;*.bin;*.cs16)|*.raw;*.bin;*.cs16|All files|*.*" })
@@ -369,6 +401,7 @@ namespace IqViewer
             UpdateFft();
 
             var s = _data.ComputeStats(full);
+            if (s.PeakDbfs >= ClipDbfs) TriggerClip();
             _stats.Text = string.Format(CultureInfo.InvariantCulture,
                 "Samples: {0}   Duration: {1:0.###} ms   (FS = {2})\r\n" +
                 "RMS: {3:0.000000} (linear)   Peak: {4:0.00} dBFS   Average: {5:0.00} dBFS   Min: {6:0.00} dBFS",
