@@ -139,7 +139,7 @@ namespace IqViewer
         // Cells are placed explicitly so hiding a row's controls (mode switch) cannot shift the others.
         Label AddRow(TableLayoutPanel t, string label, Control c)
         {
-            var l = new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 3, 3) };
+            var l = new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Top | AnchorStyles.Left, Margin = new Padding(3, 6, 3, 3) };
             AddRow(t, l, c);
             return l;
         }
@@ -294,6 +294,7 @@ namespace IqViewer
         {
             CaptureParams applied = p;
             if (!await Task.Run(() => _sdr.Configure(applied, ct))) { Log("Cancelled."); return; }
+            _plot.MarkerSpan = 0; // the Marker -> FFT range is a VSA concept
             SweepLayout layout = null;
             double[] trace = null;
             bool prevHold = false;
